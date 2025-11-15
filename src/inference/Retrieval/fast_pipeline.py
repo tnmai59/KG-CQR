@@ -14,11 +14,16 @@ import multiprocessing
 from multiprocessing import Pool
 from tqdm.notebook import tqdm
 import warnings
+import pandas as pd
 warnings.filterwarnings('ignore')
 from transformers.utils import logging
 logging.set_verbosity_error()
 from transformers import DPRQuestionEncoder, DPRContextEncoder, DPRQuestionEncoderTokenizer, DPRContextEncoderTokenizer, AutoTokenizer
 import torch
+from config import *
+import pickle
+import numpy as np
+from embeddings import CustomAPIEmbeddings
 
 # Environment setup
 os.environ["http_proxy"] = ""
@@ -26,59 +31,24 @@ os.environ["https_proxy"] = ""
 os.environ['CUDA_VISIBLE_DEVICES'] = "0"
 
 # LLM API setup
-inference_server_url = "http://127.0.0.1:9012/v1"
-tokenizer = AutoTokenizer.from_pretrained("meta-llama/Meta-Llama-3-70B-Instruct")
+tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
 llm = ChatOpenAI(
-    model="Meta-Llama-3-70B-Instruct",
+    model=MODEL_NAME,
     openai_api_key="test",
-    openai_api_base=inference_server_url,
+    openai_api_base=INFERENCE_SERVER_URL,
     temperature=0,
     streaming=False
 )
 
 # Embedding API
-class CustomAPIEmbeddings(Embeddings):
-    def __init__(self, api_url: str, show_progress: bool = False):
-        self.api_url = api_url
-        self.show_progress = show_progress
+embeddings = CustomAPIEmbeddings(api_url=EMBEDDING_API_URL, show_progress=False)
 
-    def embed_documents(self, texts: List[str]) -> List[List[float]]:
-        lst_embedding = []
-        for query in texts:
-            payload = json.dumps({"query": query})
-            headers = {'Content-Type': 'application/json'}
-            try:
-                response = json.loads(requests.request("POST", self.api_url, headers=headers, data=payload).text)['embedding']
-            except Exception as e:
-                print(f"Embedding error: {e}")
-                response = None
-            lst_embedding.append(response)
-        return lst_embedding
 
-    def embed_query(self, text: str) -> List[float]:
-        return self.embed_documents([text])[0]
-
-embeddings = CustomAPIEmbeddings(api_url='http://0.0.0.0:8000/get_emb', show_progress=False)
-
-# Load triplet data
-with open("triplet_map_multihop.pkl", 'rb') as f:
+with open(TRIPLET_MAP_PATH,'rb') as f:
     dct_mapping_triplet = pickle.load(f)
-with open("triplet_emb_multihop.pkl", 'rb') as f:
+
+with open(TRIPLET_EMB_PATH,'rb') as f:
     lst_embedding = pickle.load(f)
-lst_embedding = np.array(lst_embedding)
-
-# Load test data
-with open("../data/raw_data/multihopRAG/MultiHopRAG.json", 'r') as f:
-    test_data = json.load(f)
-test_data_question = [x['query'] for x in test_data]
-
-# Faiss index
-faiss_embeddings = lst_embedding.astype('float32')
-d = faiss_embeddings.shape[1]
-index_cpu = faiss.IndexFlatL2(d)
-res = faiss.StandardGpuResources()
-index = faiss.index_cpu_to_gpu(res, 0, index_cpu)
-index.add(faiss_embeddings)
 
 def faiss_cosine(query_vector, k=10):
     query_vector = query_vector.astype('float32')
@@ -86,39 +56,41 @@ def faiss_cosine(query_vector, k=10):
     return indices.flatten()
 
 def query_triplet_topk(query, k=10):
-    query_emb = np.array(embeddings.embed_query(query)).reshape(1, -1)
-    topk_indices_sorted = faiss_cosine(query_emb, k=k).tolist()
+    query_emb = np.array(embeddings.embed_query(query)).reshape(1,-1)
+    topk_indices_sorted = faiss_cosine(query_emb).tolist()
     return [dct_mapping_triplet[x] for x in topk_indices_sorted]
 
-# Retrieve top10 for each query in test_data
-lst_triplet_top_k_cos = [query_triplet_topk(q) for q in test_data_question]
+lst_embedding = np.array(lst_embedding)
+df_test = pd.read_json(TEST_DATA_PATH, lines=True)
+test_data = df_test['question'].tolist()
+df_test['documents'] = df_test['documents'].map(lambda x : eval(x))
+faiss_embeddings = lst_embedding.astype('float32')
+d = faiss_embeddings.shape[1]  
+index_cpu = faiss.IndexFlatL2(d)
+res = faiss.StandardGpuResources()  
+index = faiss.index_cpu_to_gpu(res, 0, index_cpu)
+index.add(faiss_embeddings)
+lst_triplet_top_k_cos = []
+for i in tqdm(test_data):
+    lst_triplet_top_k_cos.append(query_triplet_topk(i))
+map_triplet = {}
+for i,j in zip(lst_triplet_top_k_cos, test_data):
+    map_triplet[j] = i
 
-# Map top10 relevant triplets with a question in test set
-map_triplet = {j: i for i, j in zip(lst_triplet_top_k_cos, test_data_question)}
+import pickle
 
-# Load CQR results
-with open("cqr_res_final_multihop.pkl", "rb") as f:
+with open("cqr_res_ragbench.pkl","rb") as f:
     cqr_res = pickle.load(f)
 
-# Evaluate
-with open("../data/processed_data/multihopRAG.pkl", "rb") as f:
-    lst_chunks = pickle.load(f)
-lst_docs = list(set([x.page_content for x in lst_chunks]))
-mapping_chunks = {j: i for i, j in enumerate(lst_docs)}
-
-# Label creation
-def create_labels(test_data, lst_docs):
-    lst_label = []
-    for item in test_data:
-        label = set()
-        for evidence in item['evidence_list']:
-            fact = evidence['fact']
-            for idx, doc in enumerate(lst_docs):
-                if fact in doc:
-                    label.add(idx)
-        lst_label.append(label)
-    return lst_label
-lst_label = create_labels(test_data, lst_docs)
+with open("../data/processed_data/passages.txt","r") as f:
+    lst_chunks = f.read().split("<endofpassage>")[:-1]
+mapping_chunks = {j:i for i,j in enumerate(list(set(lst_chunks)))}
+lst_chunks = list(set(lst_chunks))
+lst_docs = lst_chunks
+lst_label = []
+for idx, row in tqdm(df_test.iterrows()):
+	label = {mapping_chunks[x] for x in row['documents']}
+	lst_label.append(label)
 
 def recall_at_k(relevant_docs, retrieved_docs, k=25):
     k = min(k, len(retrieved_docs))
@@ -317,4 +289,13 @@ for alpha in [0.7, 0.5, 0.3, 0.0]:
         avg_recall_k = [recall_at_k(i, j, k) for i, j in zip(lst_label, dpr_results)]
         print(f"Average recall@{k} : {sum(avg_recall_k) / len(avg_recall_k)}")
         lst_dpr[str(alpha)].append(sum(avg_recall_k) / len(avg_recall_k))
+
+
+
+
+
+
+
+
+
 
