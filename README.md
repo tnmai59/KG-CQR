@@ -116,6 +116,6 @@ Key configuration parameters in `src/inference/config.py`:
 
 ## Authors
 
-- minhbc4@viettel.com.vn
-- nambkh@viettel.com.vn
-- maitn4@viettel.com.vn
+- buichiminh.cntt@gmail.com
+- hoainam.bk2012@gmail.com
+- thieungocmai.watt@gmail.com
