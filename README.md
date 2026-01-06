@@ -1,6 +1,10 @@
-# KG-Contextual-Question-Retrieval
+# KG-CQR: Leveraging Structured Relation Representations in Knowledge Graphs for Contextual Query Retrieval
 
 This project leverages a knowledge graph to improve the retrieval phase of contextual questions.
+
+## Paper
+
+https://aclanthology.org/2025.emnlp-main.824.pdf
 
 ## Environment Requirements
 
@@ -114,8 +118,38 @@ Key configuration parameters in `src/inference/config.py`:
 - FAISS for efficient similarity search
 - Custom API embeddings for text embeddings
 
+## Citation
+
+If you are interested or inspired by this work, you can cite us by:
+
+```
+@inproceedings{bui-etal-2025-kg,
+    title = "{KG}-{CQR}: Leveraging Structured Relation Representations in Knowledge Graphs for Contextual Query Retrieval",
+    author = "Bui, Chi Minh  and
+      Thieu, Ngoc Mai  and
+      Van Nguyen, Vinh  and
+      Jung, Jason J.  and
+      Bui, Khac-Hoai Nam",
+    editor = "Christodoulopoulos, Christos  and
+      Chakraborty, Tanmoy  and
+      Rose, Carolyn  and
+      Peng, Violet",
+    booktitle = "Proceedings of the 2025 Conference on Empirical Methods in Natural Language Processing",
+    month = nov,
+    year = "2025",
+    address = "Suzhou, China",
+    publisher = "Association for Computational Linguistics",
+    url = "https://aclanthology.org/2025.emnlp-main.824/",
+    doi = "10.18653/v1/2025.emnlp-main.824",
+    pages = "16281--16298",
+    ISBN = "979-8-89176-332-6"
+}
+```
+
 ## Authors
 
 - buichiminh.cntt@gmail.com
 - hoainam.bk2012@gmail.com
 - thieungocmai.watt@gmail.com
+
+
